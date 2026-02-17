@@ -1,0 +1,15 @@
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; margin: 24px; }
+main { max-width: 900px; margin: 0 auto; }
+#scenario-box { border: 1px solid #ccc; padding: 12px; border-radius: 6px; background: #fafafa; }
+#rating-buttons button { margin: 4px; padding: 8px 12px; }
+#progress { margin: 8px 0; }
+#info { margin-bottom: 8px; color: #333; }
+textarea { width: 100%; }
+
+#scale-explain { margin-top: 8px; color: #444; font-size: 0.95em; font-style: italic; }
+
+#rating-buttons button.selected {
+	background-color: #007ACC;
+	color: white;
+	border: 1px solid #005A9E;
+}

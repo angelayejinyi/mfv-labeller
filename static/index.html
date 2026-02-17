@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Labeling App</title>
+  <link rel="stylesheet" href="/static/app.css" />
+  <!-- inline tiny SVG favicon to avoid extra 404 for /favicon.ico -->
+  <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="%23007ACC"/></svg>' />
+</head>
+<body>
+  <main>
+    <h1>Moral Vignette Rating Task</h1>
+
+    <div id="intro">
+      <p>You will rate <strong>30</strong> scenarios about moral dilemmas. Please rate moral wrongness on a 0-4 scale where 0 = not at all wrong and 4 = extremely wrong.</p>
+      <div style="margin:10px 0;">
+        <label for="attendee-name"><strong>If you are a CSCI699 participant, enter your name for attendance (optional):</strong></label><br />
+        <input id="attendee-name" type="text" placeholder="Your name (CSCI699 only)" style="width:60%; padding:6px; margin-top:6px" />
+      </div>
+      <button id="start">Start</button>
+    </div>
+
+    <div id="task" style="display:none">
+      <div id="info"></div>
+      <div id="progress"></div>
+      <div id="scenario-box">
+        <h3 id="scenario-title"></h3>
+        <p id="scenario-text"></p>
+      </div>
+      <div id="rating">
+        <p id="is-wrong-prompt"><strong>Read the scenario above — to what extent do you think this scenario is morally wrong?</strong></p>
+        <p id="scale-explain">Scale: 0 = not at all wrong, 1 = slightly wrong, 2 = moderately wrong, 3 = very wrong, 4 = extremely wrong.</p>
+        <label>Rating:</label>
+        <div id="rating-buttons"></div>
+      </div>
+      <!-- optional note removed per request -->
+      <div style="margin-top:12px;">
+        <button id="prev">Previous</button>
+        <button id="next">Next</button>
+        <button id="submitAll" style="float:right">Finish & Submit</button>
+      </div>
+    </div>
+
+    <div id="done" style="display:none">
+      <h2>Thanks — your responses were submitted.</h2>
+      <p id="done-info"></p>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
