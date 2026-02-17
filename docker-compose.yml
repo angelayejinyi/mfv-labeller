@@ -4,6 +4,10 @@ services:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      # Provide your DATABASE_URL in a local .env file or via your deployment environment.
+      # Example in .env: DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+      DATABASE_URL: '${DATABASE_URL}'
     volumes:
       - ./:/app
     restart: unless-stopped

@@ -11,7 +11,7 @@ Behavior / endpoints summary:
 - GET  /admin/assignments -> view foundation assignment counts (admin check)
 - GET  /admin/responses -> view responses summary (admin)
 
-Storage: SQLite (file: data.db) created on first run. The backend loads the CSV `MFV130Gen.csv` at startup to build sample pool.
+Storage: Postgres via the `DATABASE_URL` environment variable (required). The backend loads the CSV `MFV130Gen.csv` at startup to build the sample pool.
 
 Assumptions & notes:
 - A "sample" is a row from the CSV; we assign an internal numeric sample_id (row index) when loading the CSV.
@@ -26,8 +26,8 @@ Run (development):
 
 import csv
 import json
+import os
 import random
-import sqlite3
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -39,7 +39,6 @@ from typing import Dict, List, Tuple
 
 DATA_DIR = Path(__file__).parent
 CSV_PATH = DATA_DIR / "MFV130Gen.csv"
-DB_PATH = DATA_DIR / "data.db"
 SAMPLE_ORIGINAL_COUNT = 10
 SAMPLE_GENERATED_COUNT = 20
 TOTAL_PER_PARTICIPANT = SAMPLE_ORIGINAL_COUNT + SAMPLE_GENERATED_COUNT
@@ -95,13 +94,42 @@ def load_samples():
     FOUNDATIONS = sorted(list({s["foundation"] for s in SAMPLES}))
 
 
-def init_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+# Database helper: Postgres only. A DATABASE_URL environment variable (Postgres connection string) is required.
+USE_PG = True
+
+
+def get_conn():
+    """Return a DB connection.
+
+    NOTE: This application is configured to save responses only to an online database.
+    A `DATABASE_URL` environment variable (Postgres connection string) is required. The
+    previous local SQLite fallback has been intentionally disabled to avoid creating or
+    modifying a local `data.db` file.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL must be set. Local SQLite (data.db) is disabled by configuration.")
+    try:
+        import psycopg2
+    except Exception:
+        raise RuntimeError("psycopg2 is required for Postgres but not installed")
+    # sslmode=require is commonly required for managed Postgres services
+    conn = psycopg2.connect(database_url, sslmode="require")
+    return conn
+
+
+def init_db():
+    """Initialize DB connection and ensure tables exist. Returns a DB connection object.
+
+    This initialization requires a Postgres `DATABASE_URL`. The function will create
+    Postgres-compatible tables if they do not already exist.
+    """
+    conn = get_conn()
     cur = conn.cursor()
-    # participants: id (text), assigned_foundations (json), samples (json list of sample ids), created_at
+    # Postgres DDL
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS participants(
+        CREATE TABLE IF NOT EXISTS participants (
             id TEXT PRIMARY KEY,
             assigned_foundations TEXT,
             samples_json TEXT,
@@ -110,33 +138,40 @@ def init_db() -> sqlite3.Connection:
         )
         """
     )
-    # responses: id integer primary key, participant_id, sample_id, rating, note, ts
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS responses(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS responses (
+            id SERIAL PRIMARY KEY,
             participant_id TEXT,
             sample_id INTEGER,
             rating INTEGER,
-            note TEXT,
             ts TEXT
         )
         """
     )
-    # Ensure older DBs get a `name` column if missing
-    cur.execute("PRAGMA table_info(participants)")
-    cols = [r[1] for r in cur.fetchall()]
-    if "name" not in cols:
-        try:
-            cur.execute("ALTER TABLE participants ADD COLUMN name TEXT")
-        except Exception:
-            # best-effort; if this fails, continue
-            pass
     conn.commit()
     return conn
 
 
-DB = init_db()
+try:
+    DB = init_db()
+except Exception as e:
+    # If DB initialization fails (bad/missing DATABASE_URL or network/DNS issue),
+    # keep the app running in read-only mode so frontend and sample serving work.
+    print("WARNING: Database initialization failed:", e)
+    DB = None
+
+
+# Helper to execute parameterized queries across sqlite ("?" params) and psycopg2 ("%s" params)
+def db_execute(conn, sql, params=None):
+    """Execute a query on a Postgres connection. Convert sqlite-style ? placeholders to %s for psycopg2."""
+    cur = conn.cursor()
+    if params:
+        sql_exec = sql.replace("?", "%s")
+        cur.execute(sql_exec, params)
+    else:
+        cur.execute(sql)
+    return cur
 
 
 @app.on_event("startup")
@@ -145,9 +180,8 @@ def startup():
 
 
 # Helper: get assignment counts per foundation-pair to balance assignments
-def get_foundation_pair_counts(conn: sqlite3.Connection) -> Dict[Tuple[str, str], int]:
-    cur = conn.cursor()
-    cur.execute("SELECT assigned_foundations FROM participants")
+def get_foundation_pair_counts(conn) -> Dict[Tuple[str, str], int]:
+    cur = db_execute(conn, "SELECT assigned_foundations FROM participants")
     rows = cur.fetchall()
     cnt = Counter()
     for (af,) in rows:
@@ -162,7 +196,7 @@ def get_foundation_pair_counts(conn: sqlite3.Connection) -> Dict[Tuple[str, str]
     return cnt
 
 
-def choose_balanced_pair(conn: sqlite3.Connection) -> Tuple[str, str]:
+def choose_balanced_pair(conn) -> Tuple[str, str]:
     """
     Choose a pair of distinct foundations (a, b) such that pair counts are as balanced as possible.
     We'll consider all unordered pairs and pick the one with minimal count; tie-break randomly.
@@ -259,6 +293,8 @@ async def register(request: Request):
 
     Accepts optional JSON body: { "name": "Attendee Name" }
     """
+    if DB is None:
+        raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
     conn = DB
     # parse optional name from request body (frontend may send {name})
     try:
@@ -273,12 +309,9 @@ async def register(request: Request):
 
     sample_ids = sample_for_pair(pair, SAMPLE_ORIGINAL_COUNT, SAMPLE_GENERATED_COUNT)
 
-    cur = conn.cursor()
     # include name when inserting (nullable)
-    cur.execute(
-        "INSERT INTO participants(id, assigned_foundations, samples_json, created_at, name) VALUES (?, ?, ?, ?, ?)",
-        (pid, json.dumps(list(pair)), json.dumps(sample_ids), datetime.utcnow().isoformat(), name),
-    )
+    db_execute(conn, "INSERT INTO participants(id, assigned_foundations, samples_json, created_at, name) VALUES (?, ?, ?, ?, ?)",
+               (pid, json.dumps(list(pair)), json.dumps(sample_ids), datetime.utcnow().isoformat(), name))
     conn.commit()
 
     # return participant info and sample list (with scenario text)
@@ -291,8 +324,9 @@ async def register(request: Request):
 
 @app.get("/participant/{pid}/samples")
 def get_participant_samples(pid: str):
-    cur = DB.cursor()
-    cur.execute("SELECT samples_json, assigned_foundations, name FROM participants WHERE id = ?", (pid,))
+    if DB is None:
+        raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
+    cur = db_execute(DB, "SELECT samples_json, assigned_foundations, name FROM participants WHERE id = ?", (pid,))
     row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="participant not found")
@@ -320,9 +354,10 @@ def submit(resp: Dict):
     if not (0 <= rating <= 4):
         raise HTTPException(status_code=400, detail="rating must be 0..4")
 
-    cur = DB.cursor()
+    if DB is None:
+        raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
+    cur = db_execute(DB, "SELECT samples_json FROM participants WHERE id = ?", (pid,))
     # Optionally: check participant and that sample belongs to their assigned samples
-    cur.execute("SELECT samples_json FROM participants WHERE id = ?", (pid,))
     row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="participant not found")
@@ -333,10 +368,8 @@ def submit(resp: Dict):
         pass
 
     # store response without optional note (notes are no longer collected)
-    cur.execute(
-        "INSERT INTO responses(participant_id, sample_id, rating, ts) VALUES (?, ?, ?, ?)",
-        (pid, sample_id, rating, datetime.utcnow().isoformat()),
-    )
+    db_execute(DB, "INSERT INTO responses(participant_id, sample_id, rating, ts) VALUES (?, ?, ?, ?)",
+               (pid, sample_id, rating, datetime.utcnow().isoformat()))
     DB.commit()
     return {"ok": True}
 
@@ -344,8 +377,9 @@ def submit(resp: Dict):
 @app.get("/admin/assignments")
 def admin_assignments():
     """Return counts of how many participants have each foundation pair, and counts of each single foundation assignment."""
-    cur = DB.cursor()
-    cur.execute("SELECT assigned_foundations FROM participants")
+    if DB is None:
+        raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
+    cur = db_execute(DB, "SELECT assigned_foundations FROM participants")
     rows = cur.fetchall()
     pair_counts = Counter()
     single_counts = Counter()
@@ -366,8 +400,9 @@ def admin_assignments():
 @app.get("/admin/responses")
 def admin_responses():
     """Return basic aggregated response info: counts per foundation and per label, and raw responses (limited)."""
-    cur = DB.cursor()
-    cur.execute("SELECT participant_id, sample_id, rating, ts FROM responses ORDER BY ts DESC LIMIT 2000")
+    if DB is None:
+        raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
+    cur = db_execute(DB, "SELECT participant_id, sample_id, rating, ts FROM responses ORDER BY ts DESC LIMIT 2000")
     rows = cur.fetchall()
     # aggregate counts per foundation by looking up sample foundation
     agg = defaultdict(lambda: {"original": 0, "generated": 0, "total": 0})
