@@ -30,7 +30,8 @@ async function registerAndLoad() {
   APP.index = 0;
   document.getElementById('intro').style.display = 'none';
   document.getElementById('task').style.display = 'block';
-  document.getElementById('info').textContent = `Participant: ${APP.participant_id} — Foundations: ${res.assigned_foundations.join(', ')}`;
+  // Do not show foundation names to participants; only show participant id and basic info.
+  document.getElementById('info').textContent = `Participant: ${APP.participant_id}`;
   renderCurrent();
 }
 
@@ -44,7 +45,8 @@ function renderCurrent() {
   // rating buttons
   const rb = document.getElementById('rating-buttons');
   rb.innerHTML = '';
-  for (let i = 0; i <= 4; i++) {
+  // Rating scale: 1..5 (previously 0..4)
+  for (let i = 1; i <= 5; i++) {
     const btn = document.createElement('button');
     btn.textContent = i;
     btn.onclick = () => {

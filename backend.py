@@ -351,8 +351,9 @@ def submit(resp: Dict):
         rating = int(rating)
     except Exception:
         raise HTTPException(status_code=400, detail="rating must be integer")
-    if not (0 <= rating <= 4):
-        raise HTTPException(status_code=400, detail="rating must be 0..4")
+    # Ratings now use a 1-5 scale (previously 0-4). Validate accordingly.
+    if not (1 <= rating <= 5):
+        raise HTTPException(status_code=400, detail="rating must be 1..5")
 
     if DB is None:
         raise HTTPException(status_code=503, detail="Database unavailable. Configure DATABASE_URL and ensure network/DNS is reachable.")
