@@ -316,10 +316,15 @@ async def register(request: Request):
 
     # return participant info and sample list (with scenario text)
     samples = [s for s in SAMPLES if s["id"] in sample_ids]
-    # maintain order of sample_ids
+    # maintain order of sample_ids and strip foundation before returning to participant
     id_to_sample = {s["id"]: s for s in samples}
-    ordered = [id_to_sample[sid] for sid in sample_ids]
-    return {"participant_id": pid, "assigned_foundations": list(pair), "samples": ordered, "name": name}
+    ordered = []
+    for sid in sample_ids:
+        s = id_to_sample[sid]
+        s_copy = {k: v for k, v in s.items() if k != "foundation"}
+        ordered.append(s_copy)
+    # Do NOT return assigned_foundations to participants (hide foundation names)
+    return {"participant_id": pid, "samples": ordered, "name": name}
 
 
 @app.get("/participant/{pid}/samples")
@@ -334,8 +339,13 @@ def get_participant_samples(pid: str):
     sample_ids = json.loads(samples_json)
     samples = [s for s in SAMPLES if s["id"] in sample_ids]
     id_to_sample = {s["id"]: s for s in samples}
-    ordered = [id_to_sample[sid] for sid in sample_ids]
-    return {"participant_id": pid, "assigned_foundations": json.loads(assigned_foundations), "samples": ordered, "name": name}
+    ordered = []
+    for sid in sample_ids:
+        s = id_to_sample[sid]
+        s_copy = {k: v for k, v in s.items() if k != "foundation"}
+        ordered.append(s_copy)
+    # Do NOT return assigned_foundations to participants (hide foundation names)
+    return {"participant_id": pid, "samples": ordered, "name": name}
 
 
 @app.post("/submit")
