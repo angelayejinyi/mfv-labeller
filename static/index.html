@@ -48,6 +48,7 @@
     </div>
   </main>
 
-  <script src="/static/app.js"></script>
+  <!-- cache-bust query param ensures browsers fetch newest app.js after deploy -->
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>
